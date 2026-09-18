@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test / coverage / lint
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+secrets.yaml
+secrets.yml
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# ML / MTSD artifacts (never commit)
+*.pt
+*.pth
+*.onnx
+*.engine
+*.bin
+*.safetensors
+*.ckpt
+data/
+datasets/
+runs/
+weights/
+models/*.pt
+models/*.onnx
+
+# Cursor local
+.cursor/
+
+# Contour Talk browser dumps (keep lec2.txt / handoff only)
+docs/ИИИ-3-ПИиИД-1*

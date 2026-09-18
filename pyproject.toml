@@ -1,0 +1,75 @@
+[project]
+name = "mtsd-detector"
+version = "0.1.2"
+description = "MLOps course lab: async FastAPI service for MTSD traffic-sign detection pipeline"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    # web / runtime (course "web" group — lives in project deps, not --group)
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic-settings>=2.6.0",
+    "pyyaml>=6.0.2",
+    "asyncpg>=0.30.0",
+]
+
+[project.scripts]
+mtsd-detector = "mtsd_detector.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mtsd_detector"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.0",
+    "pre-commit>=4.0.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["src"]
+# Avoid broken ROS pytest plugins installed system-wide on this machine.
+addopts = ["-p", "no:launch_testing", "-p", "no:launch_ros", "-p", "no:ament_xmllint", "-p", "no:ament_flake8", "-p", "no:ament_pep257", "-p", "no:ament_lint", "-p", "no:ament_copyright", "-p", "no:colcon_core"]
+
+[tool.coverage.run]
+source = ["mtsd_detector"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 80

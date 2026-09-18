@@ -1,0 +1,12 @@
+environment: development
+host: 0.0.0.0
+port: 8000
+log_level: INFO
+
+# Local-lab DSN (host → published Postgres 5433).
+# Prefer APP_DATABASE__URL / .env for real credentials — see .env.example.
+database:
+  url: postgresql://mtsd:mtsd@127.0.0.1:5433/mtsd
+  pool_min_size: 1
+  pool_max_size: 5
+  connect_timeout_s: 5

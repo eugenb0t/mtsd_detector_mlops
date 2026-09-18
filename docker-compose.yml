@@ -1,0 +1,97 @@
+name: mtsd-detector
+
+networks:
+  mtsd_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mtsd-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mtsd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mtsd}
+      POSTGRES_DB: ${POSTGRES_DB:-mtsd}
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mtsd_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    logging: *default-logging
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    mem_reservation: 128m
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  app:
+    profiles: ["prod"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mtsd-detector:local
+    container_name: mtsd-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # APP_ + nested database__url. Host `postgres` is Compose DNS; port 5432
+      # is the container port (host maps 5433→5432 for local uv run).
+      APP_DATABASE__URL: ${APP_DATABASE__URL:-postgresql://mtsd:mtsd@postgres:5432/mtsd}
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-production}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+      APP_CONFIG_PATH: /app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "8000:8000"
+    networks:
+      - mtsd_net
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\"",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    mem_reservation: 128m
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M

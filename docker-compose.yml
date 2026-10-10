@@ -126,7 +126,7 @@ services:
       APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
       APP_CONFIG_PATH: /app/config.yaml
       APP_MLFLOW__TRACKING_URI: ${APP_MLFLOW__TRACKING_URI:-http://mlflow:5000}
-      APP_MLFLOW__MODEL_NAME: ${APP_MLFLOW__MODEL_NAME:-mtsd20-crop-classifier}
+      APP_MLFLOW__MODEL_NAME: ${APP_MLFLOW__MODEL_NAME:-mtsd20-detector}
       APP_MLFLOW__MODEL_ALIAS: ${APP_MLFLOW__MODEL_ALIAS:-champion}
     volumes:
       - ./config.yaml:/app/config.yaml:ro

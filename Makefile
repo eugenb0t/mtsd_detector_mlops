@@ -1,4 +1,4 @@
-.PHONY: sync lint format test cov up-db up-mlflow up-prod down pre-commit smoke env mlflow-pipeline
+.PHONY: sync lint format test cov up-db up-mlflow up-prod down pre-commit smoke env mlflow-pipeline mlflow-detector
 
 sync:
 	uv sync
@@ -27,6 +27,9 @@ up-mlflow: env
 
 mlflow-pipeline:
 	uv run mlflow-pipeline --tracking-uri $${MLFLOW_TRACKING_URI:-http://127.0.0.1:5000}
+
+mlflow-detector:
+	uv run mlflow-detector --tracking-uri $${MLFLOW_TRACKING_URI:-http://127.0.0.1:5000}
 
 up-prod: env
 	docker compose --profile prod up --build -d

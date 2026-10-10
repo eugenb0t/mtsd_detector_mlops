@@ -15,5 +15,5 @@ database:
 # Keep it null for local API tests without an MLflow server.
 mlflow:
   tracking_uri: null
-  model_name: mtsd20-crop-classifier
+  model_name: mtsd20-detector
   model_alias: champion

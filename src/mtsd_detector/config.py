@@ -30,7 +30,7 @@ class MLflowSettings(BaseModel):
     """Registry settings used by the inference process at startup."""
 
     tracking_uri: str | None = None
-    model_name: str = "mtsd20-crop-classifier"
+    model_name: str = "mtsd20-detector"
     model_alias: str = "champion"
 
     @property

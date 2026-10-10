@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, MagicMock
@@ -117,15 +118,28 @@ async def client_with_model(
         return pool
 
     class FakeModel:
-        def predict(self, _frame: object) -> list[int]:
-            return [7]
-
-        def predict_proba(self, _frame: object) -> list[list[float]]:
-            return [[0.25, 0.75]]
+        def predict(self, _frame: object) -> list[str]:
+            return [
+                json.dumps(
+                    {
+                        "detections": [
+                            {
+                                "class_id": 0,
+                                "class_name": "regulatory--stop",
+                                "score": 0.95,
+                                "box": [1.0, 2.0, 30.0, 40.0],
+                            },
+                        ],
+                        "image_width": 64,
+                        "image_height": 48,
+                        "inference_ms": 1.25,
+                    },
+                ),
+            ]
 
     loaded = LoadedModel(
         model=FakeModel(),
-        model_uri="models:/mtsd20-crop-classifier@champion",
+        model_uri="models:/mtsd20-detector@champion",
         model_version="1",
         loaded_at="2026-01-01T00:00:00+00:00",
     )

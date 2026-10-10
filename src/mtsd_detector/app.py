@@ -48,6 +48,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except Exception:
             logger.exception("failed to load MLflow model at startup")
+            if settings.mlflow.tracking_uri:
+                raise
         yield
         pool = getattr(app.state, "db_pool", None)
         if pool is not None:

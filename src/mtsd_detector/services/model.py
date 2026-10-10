@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import io
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,6 +14,7 @@ from typing import Any
 import mlflow
 import pandas as pd
 from mlflow import MlflowClient
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +29,7 @@ class LoadedModel:
     loaded_at: str
 
     def predict(self, features: list[float]) -> tuple[int, list[float] | None]:
+        """Legacy crop-classifier compatibility path."""
         frame = pd.DataFrame([features], dtype="float32")
         prediction = self.model.predict(frame)
         label = int(prediction[0])
@@ -33,6 +39,52 @@ class LoadedModel:
                 float(value) for value in self.model.predict_proba(frame)[0]
             ]
         return label, probabilities
+
+    def detect(
+        self,
+        image_bytes: bytes,
+        confidence: float,
+        iou_threshold: float,
+        max_detections: int,
+    ) -> dict[str, Any]:
+        """Run the already-loaded detector without contacting MLflow."""
+        payload = pd.DataFrame(
+            [
+                {
+                    "image_base64": base64.b64encode(image_bytes).decode("ascii"),
+                    "confidence": confidence,
+                    "iou_threshold": iou_threshold,
+                    "max_detections": max_detections,
+                },
+            ],
+        )
+        result = self.model.predict(payload)
+        value = result[0] if not isinstance(result, pd.DataFrame) else result.iloc[0, 0]
+        if isinstance(value, dict):
+            return value
+        return json.loads(str(value))
+
+    async def detect_async(
+        self,
+        image_bytes: bytes,
+        confidence: float,
+        iou_threshold: float,
+        max_detections: int,
+    ) -> dict[str, Any]:
+        """Keep synchronous ONNX inference off the FastAPI event loop."""
+        return await asyncio.to_thread(
+            self.detect,
+            image_bytes,
+            confidence,
+            iou_threshold,
+            max_detections,
+        )
+
+    def warmup_detector(self) -> None:
+        """Compile ORT kernels during startup, not on the first user request."""
+        handle = io.BytesIO()
+        Image.new("RGB", (640, 640), (114, 114, 114)).save(handle, format="PNG")
+        self.detect(handle.getvalue(), 0.05, 0.5, 1)
 
 
 def load_registry_model(
@@ -71,6 +123,8 @@ def load_registry_model(
         model_version=version,
         loaded_at=datetime.now(UTC).isoformat(),
     )
+    if model_name == "mtsd20-detector":
+        loaded.warmup_detector()
     logger.info(
         "MLflow model loaded",
         extra={"model_uri": model_uri, "model_version": version},

@@ -32,14 +32,26 @@ class HealthResponse(BaseModel):
 
 
 class ProcessRequest(BaseModel):
-    """A single MTSD20 crop flattened to 16x16 grayscale pixels."""
+    """An RGB image encoded as base64 for full object detection."""
 
-    features: list[float] = Field(min_length=256, max_length=256)
+    image_base64: str = Field(min_length=32)
+    confidence: float = Field(default=0.05, ge=0.0, le=1.0)
+    iou_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_detections: int = Field(default=50, ge=1, le=200)
+
+
+class Detection(BaseModel):
+    class_id: int = Field(ge=0)
+    class_name: str
+    score: float = Field(ge=0.0, le=1.0)
+    box: tuple[float, float, float, float]
 
 
 class ProcessResponse(BaseModel):
-    prediction: int
-    probabilities: list[float] | None = None
+    detections: list[Detection]
+    image_width: int = Field(gt=0)
+    image_height: int = Field(gt=0)
+    inference_ms: float = Field(ge=0)
     model_uri: str
     model_version: str | None = None
     loaded_at: str

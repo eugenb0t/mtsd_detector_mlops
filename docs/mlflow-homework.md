@@ -22,16 +22,18 @@ params, metrics, artifacts и Model Registry.
 - `train.jsonl` и официальный labeled `val.jsonl`;
 - изображения из `runs/parallel_b0_b1/kaggle_stage/dataset/images`.
 
-Pipeline не копирует датасет в репозиторий. Он извлекает ограниченное число
-объектных crops на класс, добавляет 15% контекста, переводит в grayscale 16×16
-и нормирует в `[0, 1]`. Это CPU-friendly классификационный слой для демонстрации
-MLflow, а не замена YOLO detector из R&D.
+Основной detector pipeline не копирует датасет или веса в репозиторий. Он
+оценивает готовые обученные MTSD20 YOLO/ONNX checkpoints с входом RGB 640×640,
+декодирует `xywh`-выход, применяет class-aware NMS и возвращает bounding boxes
+в пикселях исходного изображения. Crop-classifier pipeline из
+`mlflow-pipeline` оставлен как отдельный baseline для сравнения, но в Registry
+и API используется полноценный object detector.
 
-`mlflow.log_input()` записывает dataset input в каждый run. Дополнительно
-параметры/tags содержат `dataset.source`, `dataset.digest`, источники images и
-preprocessing. `digest` — SHA-256 манифеста, JSONL и канонического CSV crops;
-`source` — путь подготовленного MTSD root. Поэтому lineage можно объяснить от
-конкретного run к конкретной версии данных.
+`mlflow.log_input()` записывает dataset input в каждый detector run.
+Дополнительно tags содержат `dataset.source`, `dataset.digest`, источник
+изображений и контракт `MTSD20 bbox manifest -> ONNX detector -> POST /process`.
+Digest detector-а — SHA-256 `dataset.json` + официального `val.jsonl`; это
+явная версия evaluation manifest, а не скрытая копия датасета.
 
 ## Запуск
 
@@ -45,24 +47,41 @@ uv run mlflow-pipeline \
   --tracking-uri http://127.0.0.1:5000 \
   --prepared-root /media/eugene/data21/mtsd/prepared_mtsd20 \
   --images-root /media/eugene/data21/mtsd/runs/parallel_b0_b1/kaggle_stage/dataset/images
+
+uv run mlflow-detector \
+  --tracking-uri http://127.0.0.1:5000 \
+  --prepared-root /media/eugene/data21/mtsd/prepared_mtsd20 \
+  --images-root /media/eugene/data21/mtsd/runs/parallel_b0_b1/kaggle_stage/dataset/images \
+  --max-images 128
 ```
 
-По умолчанию pipeline берёт до 500 train и 120 val crops на класс. Это даёт
-достаточную выборку для сравнения, но не требует обучать YOLO и не создаёт
-тяжёлые git-артефакты. Полный dataset не изменяется.
+`mlflow-detector` равномерно выбирает `--max-images` изображений из официального
+`val.jsonl`, поэтому быстрый CPU-run не смещён к первым записям манифеста.
+Полный dataset не изменяется. Checkpoints остаются на внешнем разделе, а при
+регистрации копируются только в MLflow Artifact Store.
 
-В experiment `mlops-mlflow-homework` появляются:
+В experiment `mlops-mtsd-detector` появляются два осмысленных detector runs:
+
+1. `detector-portable-b1` — компактный portable ONNX checkpoint;
+2. `detector-quality-pc` — более точный PC checkpoint.
+
+Каждый run содержит `mAP50`, `mAP50_present_classes`, precision/recall при
+IoU=0.5, mean/P99 latency, FPS и `evaluation/report.json`. Лучший detector
+регистрируется как `mtsd20-detector`, а alias `champion` указывает на его
+неизменяемую версию. Promotion gate: `mAP50_present_classes >= 0.40` и
+`P99 <= 600 ms` на CPU-limited Compose runtime.
+
+Дополнительный baseline experiment `mlops-mlflow-homework` содержит:
 
 1. `eda` — class distribution, mean crop, `summary.json`, report;
 2. `baseline-logistic` — baseline;
 3. `scaled-logistic` — preprocessing variant;
 4. `random-forest` — hyperparameter/model variant.
 
-Каждый model run содержит `accuracy`, основную `f1_macro`, вспомогательные
+Каждый baseline model run содержит `accuracy`, основную `f1_macro`, вспомогательные
 `precision_macro`, `recall_macro`, inference latency, confusion matrix и
 classification report. Каждая модель регистрируется как новая версия
-`mtsd20-crop-classifier`; pipeline выбирает лучший `f1_macro` и устанавливает
-ему alias `champion`.
+`mtsd20-crop-classifier`. Этот baseline не используется production inference.
 
 ## Inference
 
@@ -74,16 +93,23 @@ curl -fsS http://127.0.0.1:8000/healthz
 ```
 
 `app` получает `APP_MLFLOW__TRACKING_URI=http://mlflow:5000` и при startup
-однократно загружает `models:/mtsd20-crop-classifier@champion`. На `/process`
-нет вызовов MLflow: endpoint использует объект `app.state.model`.
+однократно загружает `models:/mtsd20-detector@champion`. На `/process` нет
+вызовов MLflow: endpoint использует объект `app.state.model`.
 
-Payload — crop после того же preprocessing, 256 чисел (16×16 grayscale,
-row-major, значения 0…1):
+Payload — base64-encoded RGB image и параметры postprocessing:
 
 ```bash
 uv run python - <<'PY'
-import json, urllib.request
-payload = json.dumps({"features": [0.0] * 256}).encode()
+import base64, json, pathlib, urllib.request
+image = next(pathlib.Path(
+    "/media/eugene/data21/mtsd/runs/parallel_b0_b1/kaggle_stage/dataset/images"
+).glob("*.jpg")).read_bytes()
+payload = json.dumps({
+    "image_base64": base64.b64encode(image).decode(),
+    "confidence": 0.05,
+    "iou_threshold": 0.5,
+    "max_detections": 50,
+}).encode()
 request = urllib.request.Request(
     "http://127.0.0.1:8000/process", data=payload,
     headers={"Content-Type": "application/json"}, method="POST",
@@ -92,7 +118,9 @@ print(urllib.request.urlopen(request).read().decode())
 PY
 ```
 
-Ответ содержит `prediction`, `model_uri`, `model_version` и `loaded_at`. Чтобы
+Ответ содержит `detections[]` с `class_id`, `class_name`, `score`, `box`
+(`x0,y0,x1,y1` в пикселях исходного изображения), а также image size,
+latency, `model_uri`, `model_version` и `loaded_at`. Чтобы
 продемонстрировать alias switching, в UI или CLI переключи `champion` на другую
 версию, затем перезапусти app:
 
@@ -100,7 +128,7 @@ PY
 uv run python - <<'PY'
 from mlflow import MlflowClient
 client = MlflowClient("http://127.0.0.1:5000")
-client.set_registered_model_alias("mtsd20-crop-classifier", "champion", "1")
+client.set_registered_model_alias("mtsd20-detector", "champion", "13")
 PY
 docker compose --profile prod restart app
 ```
@@ -119,6 +147,7 @@ health/smoke и переключить traffic (либо периодическ�
   позволяет обнаружить изменение содержимого.
 - Alias — подвижная роль (`champion`), version — неизменяемая запись модели.
 - `/process` асинхронный, модель грузится в lifespan startup и не загружается
-  заново на каждый запрос.
-- MTSD RGB и SoftAP Himax grayscale — разные домены; этот crop demo не заявляет
-  эквивалентность live AI-deck inference.
+  заново на каждый запрос; CPU inference вынесен в worker thread.
+- Model Registry alias выбирает версию detector-а без изменения inference-кода.
+- MTSD RGB и SoftAP Himax grayscale — разные домены; этот API явно принимает
+  RGB MTSD-style images и не заявляет эквивалентность live AI-deck inference.

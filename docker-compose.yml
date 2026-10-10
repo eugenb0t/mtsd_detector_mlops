@@ -6,6 +6,8 @@ networks:
 
 volumes:
   postgres_data:
+  mlflow_postgres_data:
+  mlflow_artifacts:
 
 x-logging: &default-logging
   driver: json-file
@@ -49,6 +51,61 @@ services:
           cpus: "0.25"
           memory: 128M
 
+  mlflow-db:
+    image: postgres:16-alpine
+    container_name: mtsd-mlflow-db
+    environment:
+      POSTGRES_USER: ${MLFLOW_POSTGRES_USER:-mlflow}
+      POSTGRES_PASSWORD: ${MLFLOW_POSTGRES_PASSWORD:-mlflow}
+      POSTGRES_DB: ${MLFLOW_POSTGRES_DB:-mlflow}
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
+    volumes:
+      - mlflow_postgres_data:/var/lib/postgresql/data
+    networks:
+      - mtsd_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    logging: *default-logging
+    restart: unless-stopped
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    image: mtsd-mlflow:local
+    container_name: mtsd-mlflow
+    depends_on:
+      mlflow-db:
+        condition: service_healthy
+    command: >-
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri
+      postgresql+psycopg2://${MLFLOW_POSTGRES_USER:-mlflow}:${MLFLOW_POSTGRES_PASSWORD:-mlflow}@mlflow-db:5432/${MLFLOW_POSTGRES_DB:-mlflow}
+      --artifacts-destination /mlartifacts --serve-artifacts
+    environment:
+      MLFLOW_POSTGRES_USER: ${MLFLOW_POSTGRES_USER:-mlflow}
+      MLFLOW_POSTGRES_PASSWORD: ${MLFLOW_POSTGRES_PASSWORD:-mlflow}
+      MLFLOW_POSTGRES_DB: ${MLFLOW_POSTGRES_DB:-mlflow}
+    volumes:
+      - mlflow_artifacts:/mlartifacts
+    ports:
+      - "5000:5000"
+    networks:
+      - mtsd_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging: *default-logging
+    restart: unless-stopped
+
   app:
     profiles: ["prod"]
     build:
@@ -59,6 +116,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mlflow:
+        condition: service_healthy
     environment:
       # APP_ + nested database__url. Host `postgres` is Compose DNS; port 5432
       # is the container port (host maps 5433→5432 for local uv run).
@@ -66,6 +125,9 @@ services:
       APP_ENVIRONMENT: ${APP_ENVIRONMENT:-production}
       APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
       APP_CONFIG_PATH: /app/config.yaml
+      APP_MLFLOW__TRACKING_URI: ${APP_MLFLOW__TRACKING_URI:-http://mlflow:5000}
+      APP_MLFLOW__MODEL_NAME: ${APP_MLFLOW__MODEL_NAME:-mtsd20-crop-classifier}
+      APP_MLFLOW__MODEL_ALIAS: ${APP_MLFLOW__MODEL_ALIAS:-champion}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     ports:

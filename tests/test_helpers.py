@@ -7,12 +7,14 @@ import logging
 import tomllib
 from importlib.metadata import version as pkg_version
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from mtsd_detector.config import Settings, clear_settings_cache, get_settings
 from mtsd_detector.logging import JsonFormatter, setup_logging
 from mtsd_detector.services.health import check_postgres, create_pool
+from mtsd_detector.services.model import LoadedModel, load_registry_model
 from mtsd_detector.services.version import get_app_version
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +81,59 @@ def test_settings_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings()
     assert settings.port == 9001
     clear_settings_cache()
+
+
+def test_loaded_model_prediction() -> None:
+    class FakeModel:
+        def predict(self, frame: object) -> list[int]:
+            assert len(frame) == 1  # type: ignore[arg-type]
+            return [3]
+
+        def predict_proba(self, _frame: object) -> list[list[float]]:
+            return [[0.1, 0.9]]
+
+    loaded = LoadedModel(FakeModel(), "model-uri", "4", "now")
+    assert loaded.predict([0.0] * 256) == (3, [0.1, 0.9])
+
+
+def test_load_registry_model_disabled() -> None:
+    assert load_registry_model(None, "model", "champion") is None
+
+
+def test_load_registry_model_reads_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeModel:
+        def predict(self, _frame: object) -> list[int]:
+            return [1]
+
+    def fake_load_model(uri: str) -> FakeModel:
+        assert uri == "models:/model@champion"
+        return FakeModel()
+
+    monkeypatch.setattr(
+        "mtsd_detector.services.model.mlflow.set_tracking_uri",
+        lambda _: None,
+    )
+    monkeypatch.setattr(
+        "mtsd_detector.services.model.mlflow.pyfunc",
+        SimpleNamespace(load_model=fake_load_model),
+    )
+
+    class FakeClient:
+        def __init__(self, tracking_uri: str) -> None:
+            assert tracking_uri == "http://mlflow"
+
+        def get_model_version_by_alias(
+            self,
+            name: str,
+            alias: str,
+        ) -> SimpleNamespace:
+            assert (name, alias) == ("model", "champion")
+            return SimpleNamespace(version=4)
+
+    monkeypatch.setattr("mtsd_detector.services.model.MlflowClient", FakeClient)
+    loaded = load_registry_model("http://mlflow", "model", "champion")
+    assert loaded is not None
+    assert loaded.model_version == "4"
 
 
 async def test_check_postgres_none_pool() -> None:

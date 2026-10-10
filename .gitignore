@@ -59,3 +59,6 @@ models/*.onnx
 
 # Contour Talk browser dumps (keep lec2.txt / handoff only)
 docs/ИИИ-3-ПИиИД-1*
+
+# Local MLflow tracking data
+mlruns/

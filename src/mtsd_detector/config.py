@@ -26,6 +26,20 @@ class DatabaseSettings(BaseModel):
     connect_timeout_s: float = 5.0
 
 
+class MLflowSettings(BaseModel):
+    """Registry settings used by the inference process at startup."""
+
+    tracking_uri: str | None = None
+    model_name: str = "mtsd20-crop-classifier"
+    model_alias: str = "champion"
+
+    @property
+    def model_uri(self) -> str | None:
+        if self.tracking_uri is None:
+            return None
+        return f"models:/{self.model_name}@{self.model_alias}"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="APP_",
@@ -39,6 +53,7 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    mlflow: MLflowSettings = Field(default_factory=MLflowSettings)
 
     @classmethod
     def settings_customise_sources(

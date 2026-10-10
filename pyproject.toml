@@ -12,10 +12,17 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "pyyaml>=6.0.2",
     "asyncpg>=0.30.0",
+    # MLflow homework runtime: registry-backed inference and reproducible demo.
+    "mlflow==2.22.0",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "pillow>=10.0.0",
+    "scikit-learn>=1.5.0",
 ]
 
 [project.scripts]
 mtsd-detector = "mtsd_detector.__main__:main"
+mlflow-pipeline = "mtsd_detector.mlops_pipeline:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -68,6 +75,7 @@ addopts = ["-p", "no:launch_testing", "-p", "no:launch_ros", "-p", "no:ament_xml
 [tool.coverage.run]
 source = ["mtsd_detector"]
 branch = true
+omit = ["src/mtsd_detector/mlops_pipeline.py"]
 
 [tool.coverage.report]
 show_missing = true

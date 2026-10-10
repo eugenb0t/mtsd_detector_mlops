@@ -29,3 +29,17 @@ class ComponentHealth(BaseModel):
 class HealthResponse(BaseModel):
     status: HealthStatus
     components: list[ComponentHealth]
+
+
+class ProcessRequest(BaseModel):
+    """A single MTSD20 crop flattened to 16x16 grayscale pixels."""
+
+    features: list[float] = Field(min_length=256, max_length=256)
+
+
+class ProcessResponse(BaseModel):
+    prediction: int
+    probabilities: list[float] | None = None
+    model_uri: str
+    model_version: str | None = None
+    loaded_at: str

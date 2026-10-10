@@ -14,6 +14,7 @@ from mtsd_detector.config import Settings, get_settings
 from mtsd_detector.logging import setup_logging
 from mtsd_detector.middleware import RequestLoggingMiddleware
 from mtsd_detector.services.health import create_pool
+from mtsd_detector.services.model import load_registry_model
 from mtsd_detector.services.version import get_app_version
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.db_pool = None
+        app.state.model = None
         try:
             app.state.db_pool = await create_pool(
                 dsn=settings.database.url,
@@ -38,6 +40,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.exception(
                 "failed to create database pool; /api/v1/health will report error",
             )
+        try:
+            app.state.model = load_registry_model(
+                tracking_uri=settings.mlflow.tracking_uri,
+                model_name=settings.mlflow.model_name,
+                model_alias=settings.mlflow.model_alias,
+            )
+        except Exception:
+            logger.exception("failed to load MLflow model at startup")
         yield
         pool = getattr(app.state, "db_pool", None)
         if pool is not None:

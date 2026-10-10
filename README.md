@@ -39,6 +39,30 @@ uv run uvicorn mtsd_detector.app:create_app --factory --host 0.0.0.0 --port 8000
 
 Подробнее и ответы на ловушки защиты: [docs/hw2.md](docs/hw2.md).
 
+## Практическая работа MLflow
+
+Полный контур ДЗ находится в [docs/mlflow-homework.md](docs/mlflow-homework.md):
+Compose поднимает отдельный Postgres backend store, файловый artifact store в
+отдельном Docker volume и
+MLflow Tracking/Registry Server. Pipeline использует найденный подготовленный
+MTSD20 (`train.jsonl` + официальный labeled `val.jsonl`), строит bbox crops,
+логирует EDA, три runs, метрики/диагностику и регистрирует модель с alias
+`champion`. Тяжёлый датасет остаётся вне git.
+
+```bash
+cp .env.example .env
+uv sync
+docker compose up -d mlflow
+uv run mlflow-pipeline \
+  --prepared-root /media/eugene/data21/mtsd/prepared_mtsd20 \
+  --images-root /media/eugene/data21/mtsd/runs/parallel_b0_b1/kaggle_stage/dataset/images
+docker compose --profile prod up --build -d app
+```
+
+UI: http://127.0.0.1:5000. После регистрации alias приложение загружает
+`models:/mtsd20-crop-classifier@champion` один раз при старте; POST контракт и
+проверка версии описаны в документации ДЗ.
+
 ## Конфигурация
 
 - YAML: `config.yaml`

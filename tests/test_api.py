@@ -88,3 +88,26 @@ async def test_healthz_still_ok_without_db(client_no_db: AsyncClient) -> None:
     response = await client_no_db.get("/healthz")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+async def test_process_uses_startup_model(client_with_model: AsyncClient) -> None:
+    response = await client_with_model.post(
+        "/process",
+        json={"features": [0.0] * 256},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "prediction": 7,
+        "probabilities": [0.25, 0.75],
+        "model_uri": "models:/mtsd20-crop-classifier@champion",
+        "model_version": "1",
+        "loaded_at": "2026-01-01T00:00:00+00:00",
+    }
+
+
+async def test_process_reports_missing_startup_model(client_ok_db: AsyncClient) -> None:
+    response = await client_ok_db.post(
+        "/process",
+        json={"features": [0.0] * 256},
+    )
+    assert response.status_code == 503

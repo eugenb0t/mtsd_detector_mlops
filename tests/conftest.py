@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from mtsd_detector.app import create_app
 from mtsd_detector.config import DatabaseSettings, Settings, clear_settings_cache
+from mtsd_detector.services.model import LoadedModel
 
 
 @pytest.fixture
@@ -100,6 +101,36 @@ async def client_db_query_fail(
         return pool
 
     monkeypatch.setattr("mtsd_detector.app.create_pool", fake_create_pool)
+    app = create_app(settings)
+    async for client in _client_with_lifespan(app):
+        yield client
+
+
+@pytest.fixture
+async def client_with_model(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[AsyncClient]:
+    pool = _mock_pool()
+
+    async def fake_create_pool(*_args: object, **_kwargs: object) -> MagicMock:
+        return pool
+
+    class FakeModel:
+        def predict(self, _frame: object) -> list[int]:
+            return [7]
+
+        def predict_proba(self, _frame: object) -> list[list[float]]:
+            return [[0.25, 0.75]]
+
+    loaded = LoadedModel(
+        model=FakeModel(),
+        model_uri="models:/mtsd20-crop-classifier@champion",
+        model_version="1",
+        loaded_at="2026-01-01T00:00:00+00:00",
+    )
+    monkeypatch.setattr("mtsd_detector.app.create_pool", fake_create_pool)
+    monkeypatch.setattr("mtsd_detector.app.load_registry_model", lambda **_: loaded)
     app = create_app(settings)
     async for client in _client_with_lifespan(app):
         yield client

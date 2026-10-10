@@ -10,3 +10,10 @@ database:
   pool_min_size: 1
   pool_max_size: 5
   connect_timeout_s: 5
+
+# Compose overrides tracking_uri and enables registry-backed /process.
+# Keep it null for local API tests without an MLflow server.
+mlflow:
+  tracking_uri: null
+  model_name: mtsd20-crop-classifier
+  model_alias: champion

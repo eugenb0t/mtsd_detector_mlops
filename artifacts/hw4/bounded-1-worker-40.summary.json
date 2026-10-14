@@ -1,0 +1,19 @@
+{
+  "final_avg_task_latency_ms": 5644.739425,
+  "final_done": 40,
+  "final_failed": 0,
+  "max_queue_depth": 8,
+  "max_queue_memory_bytes": 198088,
+  "max_queue_total_messages": 10,
+  "max_queue_unacknowledged": 2,
+  "max_source_rss_mb": 53.117,
+  "mode": "bounded",
+  "observed_consumers": 1,
+  "prefetch_count": 2,
+  "queue_limit": 8,
+  "queue_name": "mtsd.tasks.pending",
+  "samples": 104,
+  "tasks_accepted": 40,
+  "tasks_requested": 40,
+  "worker_concurrency_per_process": 2
+}

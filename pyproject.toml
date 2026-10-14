@@ -19,12 +19,16 @@ dependencies = [
     "pandas>=2.2.0",
     "pillow>=10.0.0",
     "scikit-learn>=1.5.0",
+    "faststream[rabbit]>=0.7.7",
 ]
 
 [project.scripts]
 mtsd-detector = "mtsd_detector.__main__:main"
 mlflow-pipeline = "mtsd_detector.mlops_pipeline:main"
 mlflow-detector = "mtsd_detector.mlops_detector_pipeline:main"
+mtsd-worker = "mtsd_detector.task_worker:main"
+mtsd-source = "mtsd_detector.task_source:main"
+mtsd-experiment = "mtsd_detector.task_experiment:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -41,6 +45,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "httpx>=0.28.0",
     "pre-commit>=4.0.0",
+    "testcontainers[rabbitmq]>=4.10.0",
 ]
 
 [tool.uv]
@@ -71,6 +76,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "integration: requires a Docker daemon and starts RabbitMQ with Testcontainers",
+]
 # Avoid broken ROS pytest plugins installed system-wide on this machine.
 addopts = ["-p", "no:launch_testing", "-p", "no:launch_ros", "-p", "no:ament_xmllint", "-p", "no:ament_flake8", "-p", "no:ament_pep257", "-p", "no:ament_lint", "-p", "no:ament_copyright", "-p", "no:colcon_core"]
 
@@ -81,6 +89,14 @@ omit = [
     "src/mtsd_detector/mlflow_detector_model.py",
     "src/mtsd_detector/mlops_detector_pipeline.py",
     "src/mtsd_detector/mlops_pipeline.py",
+    # Exercise these service-boundary modules with FastStream/Testcontainers
+    # and PostgreSQL integration tests rather than pretending unit coverage can
+    # replace a broker/database.
+    "src/mtsd_detector/task_experiment.py",
+    "src/mtsd_detector/task_source.py",
+    "src/mtsd_detector/task_store.py",
+    "src/mtsd_detector/api/process.py",
+    "src/mtsd_detector/__main__.py",
 ]
 
 [tool.coverage.report]

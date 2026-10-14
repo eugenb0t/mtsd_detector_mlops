@@ -50,6 +50,9 @@ Thumbs.db
 data/
 datasets/
 runs/
+
+# HW4 experiment output is reproducible and intentionally kept out of git.
+artifacts/hw4/
 weights/
 models/*.pt
 models/*.onnx

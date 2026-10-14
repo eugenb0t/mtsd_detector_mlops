@@ -1,4 +1,4 @@
-.PHONY: sync lint format test cov up-db up-mlflow up-prod down pre-commit smoke env mlflow-pipeline mlflow-detector
+.PHONY: sync lint format test cov up-db up-mlflow up-rabbit up-prod up-hw4 down pre-commit smoke env mlflow-pipeline mlflow-detector mtsd-source mtsd-experiment
 
 sync:
 	uv sync
@@ -25,6 +25,9 @@ up-db: env
 up-mlflow: env
 	docker compose up -d mlflow
 
+up-rabbit: env
+	docker compose up -d rabbitmq
+
 mlflow-pipeline:
 	uv run mlflow-pipeline --tracking-uri $${MLFLOW_TRACKING_URI:-http://127.0.0.1:5000}
 
@@ -33,6 +36,15 @@ mlflow-detector:
 
 up-prod: env
 	docker compose --profile prod up --build -d
+
+up-hw4: env
+	docker compose --profile prod --profile hw4 up --build -d --scale worker=$${WORKERS:-1}
+
+mtsd-source:
+	uv run mtsd-source --image "$${IMAGE:?set IMAGE=/path/to/image.jpg}" --count $${COUNT:-100}
+
+mtsd-experiment:
+	uv run mtsd-experiment --image "$${IMAGE:?set IMAGE=/path/to/image.jpg}" --count $${COUNT:-100}
 
 down:
 	docker compose --profile prod down

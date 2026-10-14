@@ -8,6 +8,7 @@ volumes:
   postgres_data:
   mlflow_postgres_data:
   mlflow_artifacts:
+  rabbitmq_data:
 
 x-logging: &default-logging
   driver: json-file
@@ -106,6 +107,31 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: mtsd-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - mtsd_net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    logging: *default-logging
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    mem_reservation: 128m
+
   app:
     profiles: ["prod"]
     build:
@@ -118,6 +144,8 @@ services:
         condition: service_healthy
       mlflow:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       # APP_ + nested database__url. Host `postgres` is Compose DNS; port 5432
       # is the container port (host maps 5433→5432 for local uv run).
@@ -128,6 +156,14 @@ services:
       APP_MLFLOW__TRACKING_URI: ${APP_MLFLOW__TRACKING_URI:-http://mlflow:5000}
       APP_MLFLOW__MODEL_NAME: ${APP_MLFLOW__MODEL_NAME:-mtsd20-detector}
       APP_MLFLOW__MODEL_ALIAS: ${APP_MLFLOW__MODEL_ALIAS:-champion}
+      APP_RABBIT__URL: ${APP_RABBIT__URL:-amqp://guest:guest@rabbitmq:5672/}
+      APP_RABBIT__QUEUE_NAME: ${APP_RABBIT__QUEUE_NAME:-mtsd.tasks.pending}
+      APP_RABBIT__BOUNDED_QUEUE: ${APP_RABBIT__BOUNDED_QUEUE:-true}
+      APP_RABBIT__QUEUE_MAX_LENGTH: ${APP_RABBIT__QUEUE_MAX_LENGTH:-8}
+      APP_RABBIT__PREFETCH_COUNT: ${APP_RABBIT__PREFETCH_COUNT:-2}
+      APP_RABBIT__WORKER_CONCURRENCY: ${APP_RABBIT__WORKER_CONCURRENCY:-2}
+      APP_RABBIT__MAX_RETRIES: ${APP_RABBIT__MAX_RETRIES:-2}
+      APP_RABBIT__INFERENCE_DELAY_S: ${APP_RABBIT__INFERENCE_DELAY_S:-0.25}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     ports:
@@ -144,6 +180,53 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    logging: *default-logging
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    mem_reservation: 128m
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  worker:
+    profiles: ["hw4"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mtsd-detector:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: ["mtsd-worker"]
+    environment:
+      APP_DATABASE__URL: ${APP_DATABASE__URL:-postgresql://mtsd:mtsd@postgres:5432/mtsd}
+      APP_ENVIRONMENT: production
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+      APP_MLFLOW__TRACKING_URI: ${APP_MLFLOW__TRACKING_URI:-http://mlflow:5000}
+      APP_MLFLOW__MODEL_NAME: ${APP_MLFLOW__MODEL_NAME:-mtsd20-detector}
+      APP_MLFLOW__MODEL_ALIAS: ${APP_MLFLOW__MODEL_ALIAS:-champion}
+      APP_RABBIT__URL: ${APP_RABBIT__URL:-amqp://guest:guest@rabbitmq:5672/}
+      APP_RABBIT__QUEUE_NAME: ${APP_RABBIT__QUEUE_NAME:-mtsd.tasks.pending}
+      APP_RABBIT__BOUNDED_QUEUE: ${APP_RABBIT__BOUNDED_QUEUE:-true}
+      APP_RABBIT__QUEUE_MAX_LENGTH: ${APP_RABBIT__QUEUE_MAX_LENGTH:-8}
+      APP_RABBIT__PREFETCH_COUNT: ${APP_RABBIT__PREFETCH_COUNT:-2}
+      APP_RABBIT__WORKER_CONCURRENCY: ${APP_RABBIT__WORKER_CONCURRENCY:-2}
+      APP_RABBIT__MAX_RETRIES: ${APP_RABBIT__MAX_RETRIES:-2}
+      APP_RABBIT__INFERENCE_DELAY_S: ${APP_RABBIT__INFERENCE_DELAY_S:-0.25}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - mtsd_net
     logging: *default-logging
     restart: unless-stopped
     cpus: 1.0

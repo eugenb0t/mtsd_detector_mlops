@@ -17,3 +17,20 @@ mlflow:
   tracking_uri: null
   model_name: mtsd20-detector
   model_alias: champion
+
+# HW4 FastStream/RabbitMQ task pipeline. The source/API and worker override
+# this URL through APP_RABBIT__URL in Compose or .env.
+rabbit:
+  url: null
+  queue_name: mtsd.tasks.pending
+  bounded_queue: true
+  queue_max_length: 8
+  # One worker process has two executor slots; prefetch is deliberately equal.
+  prefetch_count: 2
+  worker_concurrency: 2
+  max_retries: 2
+  retry_backoff_s: 0.25
+  inference_delay_s: 0.25
+  publish_confirm_timeout_s: 2.0
+  retry_after_s: null
+  graceful_timeout_s: 30.0

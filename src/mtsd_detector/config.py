@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -40,6 +41,30 @@ class MLflowSettings(BaseModel):
         return f"models:/{self.model_name}@{self.model_alias}"
 
 
+class RabbitSettings(BaseModel):
+    """RabbitMQ topology and explicit concurrency/backpressure contract."""
+
+    url: str | None = None
+    queue_name: str = "mtsd.tasks.pending"
+    bounded_queue: bool = True
+    queue_max_length: int = Field(default=8, ge=1)
+    prefetch_count: int = Field(default=2, ge=1)
+    worker_concurrency: int = Field(default=2, ge=1)
+    max_retries: int = Field(default=2, ge=0)
+    retry_backoff_s: float = Field(default=0.25, ge=0.0)
+    inference_delay_s: float = Field(default=0.25, ge=0.0)
+    publish_confirm_timeout_s: float = Field(default=2.0, gt=0.0)
+    retry_after_s: int | None = Field(default=None, ge=1)
+    graceful_timeout_s: float = Field(default=30.0, gt=0.0)
+
+    @property
+    def effective_retry_after_s(self) -> int:
+        """Retry hint based on one configured service-time interval."""
+        if self.retry_after_s is not None:
+            return self.retry_after_s
+        return max(1, math.ceil(self.inference_delay_s))
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="APP_",
@@ -54,6 +79,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     mlflow: MLflowSettings = Field(default_factory=MLflowSettings)
+    rabbit: RabbitSettings = Field(default_factory=RabbitSettings)
 
     @classmethod
     def settings_customise_sources(

@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from mtsd_detector.app import create_app
-from mtsd_detector.config import DatabaseSettings, Settings, clear_settings_cache
-from mtsd_detector.services.model import LoadedModel
+from mtsd_detector.config import (
+    DatabaseSettings,
+    RabbitSettings,
+    Settings,
+    clear_settings_cache,
+)
+from mtsd_detector.task_types import TaskAccepted, TaskStatus
 
 
 @pytest.fixture
@@ -107,8 +112,40 @@ async def client_db_query_fail(
         yield client
 
 
+class FakeTaskStore:
+    def __init__(self, _pool: object) -> None:
+        self.initialize_called = False
+
+    async def initialize(self) -> None:
+        self.initialize_called = True
+
+    async def get(self, _task_id: str) -> None:
+        return None
+
+
+class FakeTaskSource:
+    def __init__(self, settings: object, store: FakeTaskStore) -> None:
+        self.settings = settings
+        self.store = store
+
+    async def start(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+    async def submit(self, task: object) -> TaskAccepted:
+        task_id = task.task_id  # type: ignore[attr-defined]
+        return TaskAccepted(
+            task_id=task_id,
+            status=TaskStatus.PENDING,
+            status_url=f"/api/v1/tasks/{task_id}",
+            accepted_at=datetime.now(UTC),
+        )
+
+
 @pytest.fixture
-async def client_with_model(
+async def client_with_task_pipeline(
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[AsyncClient]:
@@ -117,34 +154,18 @@ async def client_with_model(
     async def fake_create_pool(*_args: object, **_kwargs: object) -> MagicMock:
         return pool
 
-    class FakeModel:
-        def predict(self, _frame: object) -> list[str]:
-            return [
-                json.dumps(
-                    {
-                        "detections": [
-                            {
-                                "class_id": 0,
-                                "class_name": "regulatory--stop",
-                                "score": 0.95,
-                                "box": [1.0, 2.0, 30.0, 40.0],
-                            },
-                        ],
-                        "image_width": 64,
-                        "image_height": 48,
-                        "inference_ms": 1.25,
-                    },
-                ),
-            ]
-
-    loaded = LoadedModel(
-        model=FakeModel(),
-        model_uri="models:/mtsd20-detector@champion",
-        model_version="1",
-        loaded_at="2026-01-01T00:00:00+00:00",
+    task_settings = settings.model_copy(
+        update={
+            "rabbit": RabbitSettings(
+                url="amqp://test",
+                prefetch_count=1,
+                worker_concurrency=1,
+            ),
+        },
     )
     monkeypatch.setattr("mtsd_detector.app.create_pool", fake_create_pool)
-    monkeypatch.setattr("mtsd_detector.app.load_registry_model", lambda **_: loaded)
-    app = create_app(settings)
+    monkeypatch.setattr("mtsd_detector.app.TaskStore", FakeTaskStore)
+    monkeypatch.setattr("mtsd_detector.app.TaskSource", FakeTaskSource)
+    app = create_app(task_settings)
     async for client in _client_with_lifespan(app):
         yield client

@@ -92,41 +92,35 @@ async def test_healthz_still_ok_without_db(client_no_db: AsyncClient) -> None:
     assert response.json()["status"] == "ok"
 
 
-async def test_process_uses_startup_model(client_with_model: AsyncClient) -> None:
-    response = await client_with_model.post(
-        "/process",
-        json={"image_base64": base64.b64encode(b"fake-image" * 8).decode()},
-    )
-    assert response.status_code == 200
-    assert response.json() == {
-        "detections": [
-            {
-                "class_id": 0,
-                "class_name": "regulatory--stop",
-                "score": 0.95,
-                "box": [1.0, 2.0, 30.0, 40.0],
-            },
-        ],
-        "image_width": 64,
-        "image_height": 48,
-        "inference_ms": 1.25,
-        "model_uri": "models:/mtsd20-detector@champion",
-        "model_version": "1",
-        "loaded_at": "2026-01-01T00:00:00+00:00",
-    }
-
-
-async def test_process_reports_missing_startup_model(client_ok_db: AsyncClient) -> None:
+async def test_tasks_shed_load_without_pipeline(client_ok_db: AsyncClient) -> None:
     response = await client_ok_db.post(
-        "/process",
+        "/api/v1/tasks",
         json={"image_base64": base64.b64encode(b"fake-image" * 8).decode()},
     )
     assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert "pipeline" in response.json()["detail"]
 
 
-async def test_process_rejects_invalid_image(client_with_model: AsyncClient) -> None:
-    response = await client_with_model.post(
+async def test_tasks_alias_process_is_async_submission(
+    client_with_task_pipeline: AsyncClient,
+) -> None:
+    response = await client_with_task_pipeline.post(
         "/process",
-        json={"image_base64": "not-base64-!"},
+        json={"image_base64": base64.b64encode(b"fake-image" * 8).decode()},
     )
-    assert response.status_code == 422
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "PENDING"
+    assert body["status_url"].startswith("/api/v1/tasks/")
+
+
+async def test_tasks_accepts_on_publisher_confirm(
+    client_with_task_pipeline: AsyncClient,
+) -> None:
+    response = await client_with_task_pipeline.post(
+        "/api/v1/tasks",
+        json={"image_base64": base64.b64encode(b"fake-image" * 8).decode()},
+    )
+    assert response.status_code == 202
+    assert response.json()["status"] == "PENDING"

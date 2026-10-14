@@ -68,6 +68,43 @@ UI: http://127.0.0.1:5000. После регистрации alias прилож�
 base64-encoded RGB image и возвращает классы, scores и bounding boxes. POST
 контракт и проверка версии описаны в документации ДЗ.
 
+## ДЗ4: FastStream/RabbitMQ backpressure
+
+Практическая работа по конвейеру задач описана в
+[docs/hw4-backpressure.md](docs/hw4-backpressure.md). Архитектура состоит из
+FastAPI/batch source → bounded RabbitMQ queue → независимые FastStream workers →
+PostgreSQL results. Очередь использует `x-max-length=8` и
+`x-overflow=reject-publish`; publisher-confirm NACK автоматически замедляет
+batch source. Внешний `POST /api/v1/tasks` при переполнении немедленно отвечает
+`503` с `Retry-After` (это load shedding на границе системы), а не ждёт очередь.
+
+```bash
+docker compose --profile prod --profile hw4 up --build -d --scale worker=1
+APP_RABBIT__URL=amqp://guest:guest@127.0.0.1:5672/ \
+APP_DATABASE__URL=postgresql://mtsd:mtsd@127.0.0.1:5433/mtsd \
+uv run mtsd-source \
+  --image /media/eugene/data21/mtsd/runs/parallel_b0_b1/kaggle_stage/dataset/images/mAU-BrDS6uvsqWDAaQKBGQ.jpg \
+  --count 100
+APP_RABBIT__URL=amqp://guest:guest@127.0.0.1:5672/ \
+APP_DATABASE__URL=postgresql://mtsd:mtsd@127.0.0.1:5433/mtsd \
+uv run mtsd-experiment \
+  --image /media/eugene/data21/mtsd/runs/parallel_b0_b1/kaggle_stage/dataset/images/mAU-BrDS6uvsqWDAaQKBGQ.jpg \
+  --count 100 \
+  --output artifacts/hw4/bounded-1-worker.jsonl
+docker compose --profile hw4 up -d --scale worker=2
+```
+
+`prefetch_count=2` явно равен `worker_concurrency=2`; inference вынесен из
+event loop, модель загружается один раз по MLflow alias, ручной ACK выполняется
+после записи результата, а poison messages после ограниченных retry попадают в
+DLQ. Эксперимент пишет в динамике queue depth, queue memory, source rate, RSS,
+latency и число завершённых задач. Полный сценарий bounded/unbounded и
+интеграционный Testcontainers-тест — в документации ДЗ4. Фактический прогон
+зафиксировал: bounded/1 worker — ready queue максимум 8, 40/40 DONE;
+bounded/2 workers — 40/40 DONE и средняя latency 4240 ms; unbounded/1 worker —
+ready queue максимум 38 сообщений при burst из 40. Подробная таблица и
+сценарии SIGTERM, DLQ и HTTP load shedding находятся в документации ДЗ4.
+
 ## Конфигурация
 
 - YAML: `config.yaml`

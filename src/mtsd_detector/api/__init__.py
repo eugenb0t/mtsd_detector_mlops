@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from mtsd_detector.api import healthz, process
+from mtsd_detector.api import healthz, tasks
 from mtsd_detector.api.v1 import v1_router
 
 
 def build_api_router() -> APIRouter:
     router = APIRouter()
     router.include_router(healthz.router)
-    router.include_router(process.router)
+    router.include_router(tasks.router)
+    router.include_router(tasks.legacy_router)
     router.include_router(v1_router)
     return router

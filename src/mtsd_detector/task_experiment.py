@@ -37,19 +37,31 @@ def _management_snapshot(
     try:
         with urllib.request.urlopen(request, timeout=2) as response:
             body = json.loads(response.read().decode())
+        nodes_request = urllib.request.Request(
+            f"{base_url.rstrip('/')}/api/nodes",
+        )
+        nodes_request.add_header("Authorization", f"Basic {credentials}")
+        with urllib.request.urlopen(nodes_request, timeout=2) as response:
+            nodes = json.loads(response.read().decode())
     except (OSError, urllib.error.URLError):
         return {
             "messages": None,
             "messages_ready": None,
             "messages_unacknowledged": None,
             "memory": None,
+            "rabbit_node_memory": None,
             "consumers": None,
         }
+    rabbit_node_memory = max(
+        (int(node.get("mem_used", 0)) for node in nodes),
+        default=0,
+    )
     return {
         "messages": body.get("messages"),
         "messages_ready": body.get("messages_ready"),
         "messages_unacknowledged": body.get("messages_unacknowledged"),
         "memory": body.get("memory"),
+        "rabbit_node_memory": rabbit_node_memory,
         "consumers": body.get("consumers"),
     }
 
@@ -107,6 +119,7 @@ async def run_experiment(
     samples: list[dict[str, Any]] = []
     accepted = 0
     producer_done = asyncio.Event()
+    rabbit_memory_baseline: int | None = None
 
     async def produce() -> None:
         nonlocal accepted
@@ -123,6 +136,7 @@ async def run_experiment(
             producer_done.set()
 
     async def monitor() -> None:
+        nonlocal rabbit_memory_baseline
         previous_accepted = 0
         previous_time = started
         while True:
@@ -135,6 +149,11 @@ async def run_experiment(
                 settings.rabbit.queue_name,
             )
             database = await _db_snapshot(pool, prefix)
+            if (
+                rabbit_memory_baseline is None
+                and queue["rabbit_node_memory"] is not None
+            ):
+                rabbit_memory_baseline = queue["rabbit_node_memory"]
             rate = (accepted - previous_accepted) / max(0.001, now - previous_time)
             sample = {
                 "elapsed_s": round(now - started, 3),
@@ -145,6 +164,13 @@ async def run_experiment(
                 "queue_total_messages": queue["messages"],
                 "queue_unacknowledged": queue["messages_unacknowledged"],
                 "queue_memory_bytes": queue["memory"],
+                "rabbit_node_memory_bytes": queue["rabbit_node_memory"],
+                "rabbit_node_memory_delta_bytes": (
+                    None
+                    if rabbit_memory_baseline is None
+                    or queue["rabbit_node_memory"] is None
+                    else queue["rabbit_node_memory"] - rabbit_memory_baseline
+                ),
                 "consumers": queue["consumers"],
                 "source_accepted_total": accepted,
                 "source_rate_tasks_s": round(rate, 3),
@@ -196,6 +222,14 @@ async def run_experiment(
         ),
         "max_queue_memory_bytes": max(
             (item["queue_memory_bytes"] or 0 for item in samples),
+            default=0,
+        ),
+        "max_rabbit_node_memory_bytes": max(
+            (item["rabbit_node_memory_bytes"] or 0 for item in samples),
+            default=0,
+        ),
+        "max_rabbit_node_memory_delta_bytes": max(
+            (item["rabbit_node_memory_delta_bytes"] or 0 for item in samples),
             default=0,
         ),
         "max_source_rss_mb": max(

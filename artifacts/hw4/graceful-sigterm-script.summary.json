@@ -1,0 +1,21 @@
+{
+  "final_avg_task_latency_ms": 12114.328,
+  "final_done": 2,
+  "final_failed": 0,
+  "max_queue_depth": 0,
+  "max_queue_memory_bytes": 56000,
+  "max_queue_total_messages": 2,
+  "max_queue_unacknowledged": 2,
+  "max_rabbit_node_memory_bytes": 170676224,
+  "max_rabbit_node_memory_delta_bytes": 827392,
+  "max_source_rss_mb": 52.457,
+  "mode": "bounded",
+  "observed_consumers": 1,
+  "prefetch_count": 2,
+  "queue_limit": 8,
+  "queue_name": "mtsd.tasks.pending",
+  "samples": 48,
+  "tasks_accepted": 2,
+  "tasks_requested": 2,
+  "worker_concurrency_per_process": 2
+}

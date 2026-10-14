@@ -251,3 +251,48 @@ async def test_worker_republishes_transient_failure_with_incremented_attempt() -
     assert publisher.calls[0]["queue"].name == "mtsd.tasks.pending"
     assert publisher.calls[0]["headers"] == {"x-retry-count": 1}
     message.ack.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_retry_publish_rejection_is_bounded_and_falls_back_to_dlq() -> None:
+    from mtsd_detector.task_worker import WorkerRuntime
+
+    class FullTaskQueuePublisher:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def publish(
+            self, **kwargs: Any
+        ) -> commands.Basic.Ack | commands.Basic.Nack:
+            self.calls.append(kwargs)
+            if kwargs["queue"].name == "mtsd.tasks.pending":
+                return commands.Basic.Nack(delivery_tag=1, requeue=False)
+            return commands.Basic.Ack(delivery_tag=1)
+
+    settings = _settings()
+    settings.rabbit.max_retries = 1
+    settings.rabbit.retry_backoff_s = 0
+    publisher = FullTaskQueuePublisher()
+    store = FakeStore()
+    runtime = WorkerRuntime(
+        settings,
+        store=store,
+        model=FailingModel(),
+        publisher=publisher,
+    )
+    task = DetectionTask(
+        task_id="task-retry-handoff-full",
+        image_base64=base64.b64encode(b"image" * 8).decode(),
+        submitted_at=datetime.now(UTC),
+    )
+    message = FakeMessage()
+
+    await runtime.handle(task.model_dump(mode="json"), message)  # type: ignore[arg-type]
+
+    assert [call["queue"].name for call in publisher.calls] == [
+        "mtsd.tasks.pending",
+        "mtsd.tasks.pending",
+        "mtsd.tasks.dlq",
+    ]
+    assert store.failed == [task.task_id]
+    message.ack.assert_awaited_once()

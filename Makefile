@@ -1,4 +1,4 @@
-.PHONY: sync lint format test cov up-db up-mlflow up-rabbit up-prod up-hw4 down pre-commit smoke env mlflow-pipeline mlflow-detector mtsd-source mtsd-experiment
+.PHONY: sync lint format test cov up-db up-mlflow up-rabbit up-prod up-hw4 down pre-commit smoke env mlflow-pipeline mlflow-detector mtsd-source mtsd-experiment mtsd-protection-demo
 
 sync:
 	uv sync
@@ -45,6 +45,9 @@ mtsd-source:
 
 mtsd-experiment:
 	uv run mtsd-experiment --image "$${IMAGE:?set IMAGE=/path/to/image.jpg}" --count $${COUNT:-100}
+
+mtsd-protection-demo:
+	uv run mtsd-protection-demo "$(SCENARIO)" --count $${COUNT:-30} $(if $(IMAGE),--image "$(IMAGE)")
 
 down:
 	docker compose --profile prod down

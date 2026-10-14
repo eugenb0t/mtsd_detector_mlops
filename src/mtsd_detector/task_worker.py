@@ -166,31 +166,46 @@ class WorkerRuntime:
         attempt: int,
     ) -> None:
         if attempt < self.settings.rabbit.max_retries:
-            if self.settings.rabbit.retry_backoff_s:
-                await asyncio.sleep(
-                    self.settings.rabbit.retry_backoff_s * (2**attempt),
-                )
-            try:
-                await self._publish_confirmed(
-                    raw_payload,
-                    queue=task_queue(
-                        max_length=self.settings.rabbit.queue_max_length,
-                        name=self.settings.rabbit.queue_name,
-                        bounded=self.settings.rabbit.bounded_queue,
-                    ),
-                    headers={"x-retry-count": attempt + 1},
-                    message_id=task.task_id,
-                )
-                await message.ack()
-                return
-            except PublishRejected:
-                # Keep the original unacked: RabbitMQ will redeliver it after
-                # a connection/consumer restart rather than silently lose it.
-                logger.exception(
-                    "retry publish rejected",
-                    extra={"task_id": task.task_id},
-                )
-                return
+            for handoff_attempt in range(self.settings.rabbit.max_retries + 1):
+                if self.settings.rabbit.retry_backoff_s:
+                    await asyncio.sleep(
+                        self.settings.rabbit.retry_backoff_s
+                        * (2 ** (attempt + handoff_attempt)),
+                    )
+                try:
+                    await self._publish_confirmed(
+                        raw_payload,
+                        queue=task_queue(
+                            max_length=self.settings.rabbit.queue_max_length,
+                            name=self.settings.rabbit.queue_name,
+                            bounded=self.settings.rabbit.bounded_queue,
+                        ),
+                        headers={"x-retry-count": attempt + 1},
+                        message_id=task.task_id,
+                    )
+                    await message.ack()
+                    return
+                except PublishRejected as publish_error:
+                    logger.warning(
+                        "retry publish rejected",
+                        extra={
+                            "task_id": task.task_id,
+                            "handoff_attempt": handoff_attempt + 1,
+                        },
+                    )
+                    if handoff_attempt == self.settings.rabbit.max_retries:
+                        await self._dead_letter(
+                            raw_payload,
+                            message,
+                            task_id=task.task_id,
+                            error=(
+                                f"retry handoff rejected after bounded attempts: "
+                                f"{publish_error}; inference error: {error}"
+                            ),
+                            attempt=attempt,
+                            task=task,
+                        )
+                        return
         await self._dead_letter(
             raw_payload,
             message,

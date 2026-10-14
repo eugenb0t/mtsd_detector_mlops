@@ -1,0 +1,8 @@
+{
+  "attempts": 2,
+  "dlq_ready_after": 5,
+  "dlq_ready_before": 4,
+  "error": "Only base64 data is allowed",
+  "status": "FAILED",
+  "task_id": "poison-demo-f0f77bedb2a1446db8eb6d842e32fcf8"
+}

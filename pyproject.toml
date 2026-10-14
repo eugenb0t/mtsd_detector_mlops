@@ -29,6 +29,7 @@ mlflow-detector = "mtsd_detector.mlops_detector_pipeline:main"
 mtsd-worker = "mtsd_detector.task_worker:main"
 mtsd-source = "mtsd_detector.task_source:main"
 mtsd-experiment = "mtsd_detector.task_experiment:main"
+mtsd-protection-demo = "mtsd_detector.task_protection_demo:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -89,10 +90,11 @@ omit = [
     "src/mtsd_detector/mlflow_detector_model.py",
     "src/mtsd_detector/mlops_detector_pipeline.py",
     "src/mtsd_detector/mlops_pipeline.py",
-    # Exercise these service-boundary modules with FastStream/Testcontainers
-    # and PostgreSQL integration tests rather than pretending unit coverage can
-    # replace a broker/database.
+    # These live service-boundary/CLI modules are verified against RabbitMQ,
+    # PostgreSQL and Docker in the documented protection demos, not by line
+    # coverage over mocks that would not exercise their contracts.
     "src/mtsd_detector/task_experiment.py",
+    "src/mtsd_detector/task_protection_demo.py",
     "src/mtsd_detector/task_source.py",
     "src/mtsd_detector/task_store.py",
     "src/mtsd_detector/api/process.py",

@@ -1,0 +1,18 @@
+{
+  "graceful_shutdown_evidence": {
+    "batch_active_at_worker_exit": 0,
+    "batch_done_at_worker_exit": 2,
+    "batch_rows_at_worker_exit": 2,
+    "log_reports_graceful_shutdown": true,
+    "processed_messages_during_shutdown": 2,
+    "queue_ready_after_worker_exit": 0,
+    "queue_unacknowledged_after_worker_exit": 0
+  },
+  "sigterm_container": "771a53cf5882c3bf2143059f6880a76f42b13c1e1dad1833b8d61738152d26a6",
+  "summary": "artifacts/hw4/graceful-sigterm-script.summary.json",
+  "tasks_done": 2,
+  "tasks_failed": 0,
+  "tasks_requested": 2,
+  "unacknowledged_at_signal": 2,
+  "worker_restarted_after_evidence": true
+}

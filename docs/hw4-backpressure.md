@@ -68,10 +68,18 @@ backpressure: внешний клиент нельзя замедлить вну
 - синхронное ONNX inference выполняется через `asyncio.to_thread`, а задержка
   эксперимента — через `asyncio.sleep`, event loop не блокируется;
 - используется `AckPolicy.MANUAL`, ACK отправляется только после записи
-  результата в PostgreSQL;
+  результата в PostgreSQL. ACK до записи результата мог бы потерять задачу при
+  падении worker-а, а автоматическое подтверждение до выхода handler-а имело бы
+  тот же риск. Подтверждение после записи сохраняет возможность повторной
+  доставки при падении между commit и ACK; в этом случае `task_id` и уникальные
+  ограничения хранилища превращают повтор в идемпотентную операцию;
 - ошибка повторяется ограниченное число раз (`max_retries=2`) с backoff; после
   последней попытки сообщение сначала публикуется в durable DLQ с confirm, затем
-  ACK-ается исходное сообщение;
+  ACK-ается исходное сообщение. Если сама публикация retry получает NACK из-за
+  заполненной очереди, передача повторяется ограниченное число раз с backoff;
+  если очередь всё ещё не принимает retry, исходное сообщение надёжно
+  помещается в DLQ и ACK-ается после confirm. Так оно не зависает unacked
+  навсегда и не теряется;
 - `task_id` — первичный ключ, а `idempotency_key` — уникальный ключ; повторная
   доставка после уже записанного `DONE` только ACK-ается;
 - FastStream graceful timeout ждёт уже принятые сообщения; SIGTERM прекращает
@@ -124,10 +132,11 @@ uv run mtsd-experiment \
   --output artifacts/hw4/bounded-1-worker.jsonl
 ```
 
-Фиксируются: глубина очереди и её memory из RabbitMQ Management API, число
+Фиксируются: ready depth и queue memory из RabbitMQ Management API, число
 consumer-ов, скорость подтверждённых публикаций, RSS процесса source,
-количество `DONE/FAILED` и среднее время задачи из PostgreSQL. Management API
-используется только для наблюдения.
+использование памяти узлом RabbitMQ и его изменение от baseline, количество
+`DONE/FAILED` и среднее время задачи из PostgreSQL. Management API используется
+только для наблюдения.
 
 Для контрольного запуска без ограничения очереди нужно использовать другое имя
 очереди и отдельный worker без `x-max-length`:
@@ -158,11 +167,11 @@ uv run mtsd-experiment --image /path/to/image.jpg --count 100 \
 
 Ожидаемая картина:
 
-| Режим | Очередь | Скорость source | Память source | Результат |
+| Режим | Очередь | Скорость source | Память source / broker | Результат |
 |---|---|---:|---:|---|
-| bounded, 1 worker | достигает 8 и стабилизируется | сходится к throughput worker | ограничена | все задачи DONE |
-| unbounded, 1 worker | растёт вместе с burst | близка к скорости генерации | растёт вместе с backlog | все задачи позже DONE |
-| bounded, 2 workers | тот же лимит, быстрее дренируется | примерно удваивается до предела source | ограничена | все задачи DONE быстрее |
+| bounded, 1 worker | достигает 8 и стабилизируется | сходится к throughput worker | source ограничен; broker хранит до лимита | все задачи DONE |
+| unbounded, 1 worker | растёт вместе с burst | близка к скорости генерации | source остаётся ограничен; backlog хранится в broker | все задачи позже DONE |
+| bounded, 2 workers | тот же лимит, быстрее дренируется | throughput source растёт | source ограничен; broker хранит до лимита | все задачи DONE быстрее |
 
 Фактические числа защиты берутся из `*.summary.json`; они зависят от CPU,
 размера модели и числа задач. Смена `--scale worker=1` на `--scale worker=2`
@@ -173,36 +182,91 @@ uv run mtsd-experiment --image /path/to/image.jpg --count 100 \
 
 | Режим | Задач | max ready | max total | max unacked | source RSS | средняя latency | DONE |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| bounded, 1 worker | 40 | 8 | 10 | 2 | 53.12 MiB | 5645 ms | 40 |
-| bounded, 2 workers | 40 | 5 | 9 | 4 | 52.88 MiB | 4240 ms | 40 |
-| unbounded, 1 worker | 40 | 38 | 40 | 2 | 52.70 MiB | 14880 ms | 40 |
+| bounded, 1 worker | 40 | 8 | 10 | 2 | 52.79 MiB | 5642 ms | 40 |
+| bounded, 2 workers | 40 | 8 | 12 | 4 | 53.12 MiB | 4275 ms | 40 |
+| unbounded, 1 worker | 40 | 38 | 40 | 2 | 52.50 MiB | 14088 ms | 40 |
+
+Динамика во время трёх прогонов (source rate — число новых подтверждённых
+публикаций за предыдущий пятисекундный интервал; latency — средняя от начала
+прогона для уже завершённых задач):
+
+| Время | bounded / 1 worker: ready, rate/s, DONE, latency | bounded / 2 workers: ready, rate/s, DONE, latency | unbounded / 1 worker: ready, rate/s, DONE, latency |
+|---:|---|---|---|
+| 5 s | 0, 2.17, 4, 3032 ms | 0, 3.39, 6, 3139 ms | 38, 7.62, 4, 3208 ms |
+| 10 s | 8, 1.61, 12, 4953 ms | 8, 2.48, 18, 4413 ms | 30, 0, 12, 5838 ms |
+| 15 s | 8, 1.67, 20, 5419 ms | 8, 1.99, 32, 4376 ms | 22, 0, 20, 8384 ms |
+| 20 s | 8, 1.54, 28, 5553 ms | уже завершён | 12, 0, 30, 11340 ms |
+| 25 s | 8, 0.40, 36, 5625 ms | уже завершён | 2, 0, 39, 13822 ms |
+
+Пиковое queue memory составило 198432 B (bounded/1), 198240 B (bounded/2) и
+143576 B (unbounded/1); максимум памяти узла RabbitMQ относительно baseline
+внутри каждого прогона — 5226496 B, 3649536 B и 2957312 B соответственно.
+RSS producer-а оставался стабильным около 53 MiB, поскольку источник создаёт
+задачи лениво и не копит batch в памяти. Node heap зависит также от фоновой
+активности брокера и в этих прогонах не вырос пропорционально ready depth.
+Полная временная серия каждой метрики сохраняется в локальном JSONL при запуске
+`mtsd-experiment`.
 
 `max ready` — именно глубина готовой части очереди, ограниченная
 `x-max-length`; `max total = ready + unacked`, поэтому в bounded-режиме
 значение 10 не является нарушением лимита. Через добавление второго worker
-совокупная конкурентность выросла с 2 до 4, latency прогона снизилась, а
-лимит очереди и код source не менялись. В unbounded-контроле очередь приняла
-весь burst (40 сообщений), тогда как bounded-вариант остановил ready-часть на
-8 и заставил source ждать подтверждения.
+совокупная конкурентность выросла с 2 до 4, average latency снизилась примерно
+на 24%, а лимит очереди и код source не менялись. В unbounded-контроле очередь
+приняла весь burst (40 сообщений), тогда как bounded-вариант остановил
+ready-часть на 8 и заставил source ждать подтверждения. JSONL также содержит
+`rabbit_node_memory_bytes` и `rabbit_node_memory_delta_bytes` для динамики памяти
+узла RabbitMQ отдельно от RSS producer-а и per-queue memory.
 
 Дополнительные защитные прогоны:
 
-- burst из 30 HTTP-запросов дал `202=10`, `503=20`; все 503 содержали
-  `Retry-After: 1`. После завершения принятых задач запрос к PostgreSQL дал
-  `PENDING/PROCESSING=0`;
-- при отправке `SIGTERM` одному worker во время batch из 24 задач итог был
-  `DONE=24`, без потери, а RabbitMQ после восстановления consumer-а показал
-  `messages=0`;
-- poison-задача `poison-demo-20261014` завершилась как `FAILED`,
-  `attempts=2`, и оказалась в `mtsd.tasks.dlq` после ограниченных повторов.
+- burst из 30 HTTP-запросов дал `202=12`, `503=18`; все 503 содержали
+  `Retry-After: 1`. В PostgreSQL не осталось записей с idempotency keys
+  отказанных запросов;
+- SIGTERM отправлен при двух unacked задачах у одного worker-а. До его
+  перезапуска обе задачи были `DONE`, а RabbitMQ показал ready=0 и unacked=0;
+- poison-задача из `poison-dlq.json` завершилась как `FAILED`, `attempts=2`,
+  и увеличила ready-глубину `mtsd.tasks.dlq` на одно сообщение.
 
-Компактные итоговые артефакты этих запусков сохранены в репозитории:
+Те же три проверки можно повторить одной командой на запущенном compose-стеке.
+Сценарии завершаются ненулевым кодом, если нарушены ожидания; итоговые JSON
+отчёты печатаются в stdout. `api-burst` использует реальное RGB-изображение,
+`sigterm` отправляет сигнал одному из worker-контейнеров во время batch.
+
+```bash
+IMAGE=/media/eugene/data21/mtsd/runs/parallel_b0_b1/kaggle_stage/dataset/images/mAU-BrDS6uvsqWDAaQKBGQ.jpg
+export APP_DATABASE__URL=postgresql://mtsd:mtsd@127.0.0.1:5433/mtsd
+export APP_RABBIT__URL=amqp://guest:guest@127.0.0.1:5672/
+uv run mtsd-protection-demo api-burst --count 30 --image "$IMAGE" \
+  --report artifacts/hw4/api-overload.json
+uv run mtsd-protection-demo poison --report artifacts/hw4/poison-dlq.json
+APP_RABBIT__INFERENCE_DELAY_S=10 \
+docker compose --profile hw4 up -d --scale worker=1
+uv run mtsd-protection-demo sigterm --count 2 --image "$IMAGE" \
+  --output artifacts/hw4/graceful-sigterm.jsonl \
+  --report artifacts/hw4/graceful-sigterm-demo.json
+```
+
+Сценарий `api-burst` сверяет ответы 202/503 и `Retry-After`, затем ждёт
+терминальных состояний принятых задач и проверяет отсутствие их `PENDING` и
+`PROCESSING` в PostgreSQL. `poison` публикует заведомо некорректный base64,
+проверяет итоговый статус, счётчик попыток и увеличение ready-глубины DLQ.
+`sigterm` требует ровно один worker и batch из двух задач, равный его
+конкурентности. Чтобы Management API успел отразить unacked доставки до
+завершения короткого inference, worker запускается с `APP_RABBIT__INFERENCE_DELAY_S=10`.
+Сценарий ждёт две unacked доставки при пустой ready-очереди, посылает SIGTERM и
+до перезапуска проверяет graceful shutdown в логах, две завершённые обработки,
+нулевые ready и unacked, а также две строки DONE в PostgreSQL. Затем контейнер
+запускается снова.
+
+Компактные итоговые артефакты нагрузочных запусков сохранены в репозитории:
 `artifacts/hw4/bounded-1-worker-40.summary.json`,
 `artifacts/hw4/bounded-2-workers-40.summary.json`,
 `artifacts/hw4/unbounded-1-worker-final.summary.json` и
-`artifacts/hw4/graceful-sigterm.summary.json`. Полные JSONL-трассы намеренно
-игнорируются Git, чтобы не раздувать учебный репозиторий; их можно получить
-повторным запуском приведённых команд.
+`artifacts/hw4/graceful-sigterm-script.summary.json`. Защитные проверки также
+сохраняют отчёты в `api-overload.json`, `poison-dlq.json` и
+`graceful-sigterm-demo.json`. Полные JSONL-трассы намеренно игнорируются Git,
+чтобы не раздувать учебный репозиторий; их можно получить повторным запуском
+приведённых команд.
 
 ## Проверки
 

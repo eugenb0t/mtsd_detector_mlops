@@ -1,0 +1,33 @@
+{
+  "accepted_task_states_after_drain": {
+    "DONE": 12
+  },
+  "accepted_tasks": 12,
+  "http_statuses": {
+    "202": 12,
+    "503": 18
+  },
+  "pending_or_processing_after_drain": 0,
+  "rejected_requests_with_database_rows": 0,
+  "requests": 30,
+  "retry_after_values_for_503": [
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1",
+    "1"
+  ]
+}
